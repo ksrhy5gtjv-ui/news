@@ -1,15 +1,16 @@
-name: Weekly News Scraper & Analysis
+name: Weekly News Scraper & Claude Analysis
 
 on:
   schedule:
-    - cron: '0 6 * * 0'   # 6:00 UTC Sundays
+    - cron: '0 6 * * 0'   # Runs every Sunday at 6:00 UTC
   workflow_dispatch:
 
 jobs:
   scrape-and-analyze:
     runs-on: ubuntu-latest
+
     steps:
-    - name: Checkout
+    - name: Checkout repository
       uses: actions/checkout@v4
 
     - name: Set up Python
@@ -17,20 +18,33 @@ jobs:
       with:
         python-version: '3.11'
 
-    - name: Install deps
-      run: pip install -r requirements.txt
-
-    - name: Scrape all sites to single JSON
+    - name: Install dependencies
       run: |
-        python combined_scraper.py --exclude-rc || python3 combined_scraper.py --exclude-rc
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
 
-    - name: Analyze with Claude (single pass)
+    # ---------------------------------------------------
+    # STEP 1: Run the merged static-site scraper
+    # ---------------------------------------------------
+    - name: Scrape all non-Radio-Canada sites
+      run: |
+        python combined_scraper.py --exclude-rc
+
+    # ---------------------------------------------------
+    # STEP 2: Analyze the single JSON file with Claude
+    # ---------------------------------------------------
+    - name: Analyze scraped news with Claude
       env:
         CLAUDE_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
       run: |
-        python analyze_with_claude_single.py || python3 analyze_with_claude_single.py
+        # Patch the model ID inline if needed
+        sed -i "s/claude-3-5-sonnet-20241022/claude-sonnet-4-20250514/g" analyze_with_claude_single.py
+        python analyze_with_claude_single.py
 
-    - name: Email latest analysis
+    # ---------------------------------------------------
+    # STEP 3: Email yourself the latest Claude analysis
+    # ---------------------------------------------------
+    - name: Email latest analysis results
       env:
         SMTP_SERVER: ${{ secrets.SMTP_SERVER }}
         SMTP_PORT: ${{ secrets.SMTP_PORT }}
@@ -38,12 +52,15 @@ jobs:
         EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
         EMAIL_TO: ${{ secrets.EMAIL_TO }}
       run: |
-        python send_latest_analysis_email.py || python3 send_latest_analysis_email.py
+        python send_analysis_email_Version2.py
 
-    - name: Upload artifacts
+    # ---------------------------------------------------
+    # STEP 4: Upload artifacts (optional, but useful)
+    # ---------------------------------------------------
+    - name: Upload results as workflow artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: outputs
+        name: news-analysis-results
         path: |
           scraped_data/news_articles_*.json
-          analysis/claude_analysis_*.txt
+          analysis/*.txt
