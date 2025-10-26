@@ -4,7 +4,7 @@ from email.mime.text import MIMEText
 from glob import glob
 
 # Get the latest Claude analysis result
-files = sorted(glob("scraped_data/*_claude_analysis.txt"), reverse=True)
+files = sorted(glob("scraped_data/*_storylines_ideas.txt"), reverse=True)
 if not files:
     raise Exception("No Claude analysis result file found.")
 analysis_file = files[0]
