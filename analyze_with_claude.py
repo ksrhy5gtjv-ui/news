@@ -26,7 +26,7 @@ prompt = (
 
 # Prepare Claude message
 message = client.messages.create(
-    model="claude-3-sonnet-20240224",  # or latest available, check API docs
+    model="claude-sonnet-4-5-20250929",  # Updated to current model
     max_tokens=2000,
     temperature=0.3,
     system="You are a helpful news analyst.",
