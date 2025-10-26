@@ -1,4 +1,4 @@
-import os, re, json, time, random, math
+import os, re, json
 import requests
 from bs4 import BeautifulSoup
 from datetime import datetime
@@ -258,7 +258,6 @@ def main():
     else:
         print("No articles were scraped.")
 
-# === Site lists ===
 NEWS_SITES_BASE = [
     {
         "name": "CBC News Canada",
@@ -351,15 +350,14 @@ def scrape_all_sites(include_rc=True, max_sites=None):
     for site in merged_sites(include_rc):
         if max_sites and successful_sites >= max_sites: break
         try:
-            site_articles = scrape_website(site, max_articles=site.get("max_articles", 15))
+            site_articles = scrape_website(site)
             if site_articles:
                 all_articles.extend(site_articles)
                 successful_sites += 1
         except Exception as e:
             print(f"Error scraping {site.get('name')}: {e}")
     # Deduplicate by URL
-    seen = set()
-    unique = []
+    seen = set(); unique = []
     for a in all_articles:
         url = a.get("url")
         if url and url not in seen:
