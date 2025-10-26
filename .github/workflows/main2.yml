@@ -48,3 +48,13 @@ jobs:
       with:
         name: news-claude-analysis
         path: scraped_data/*_claude_analysis.txt
+
+            - name: Email Claude analysis results
+      env:
+        SMTP_SERVER: ${{ secrets.SMTP_SERVER }}
+        SMTP_PORT: ${{ secrets.SMTP_PORT }}
+        EMAIL_USER: ${{ secrets.EMAIL_USER }}
+        EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+        EMAIL_TO: ${{ secrets.EMAIL_TO }}
+      run: |
+        python send_analysis_email.py
