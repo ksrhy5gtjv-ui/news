@@ -43,7 +43,7 @@ user_prompt = (
 content = json.dumps(compact_arts, ensure_ascii=False)
 
 msg = client.messages.create(
-    model="claude-3-5-sonnet-20241022",
+    model="claude-sonnet-4-20250514",
     max_tokens=3000,
     temperature=0.2,
     system=system_prompt,
