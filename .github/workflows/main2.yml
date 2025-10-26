@@ -49,7 +49,7 @@ jobs:
         name: news-claude-analysis
         path: scraped_data/*_claude_analysis.txt
 
-            - name: Email Claude analysis results
+    - name: Email Claude analysis results
       env:
         SMTP_SERVER: ${{ secrets.SMTP_SERVER }}
         SMTP_PORT: ${{ secrets.SMTP_PORT }}
