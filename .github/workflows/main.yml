@@ -36,3 +36,16 @@ jobs:
           scraped_data/*.csv
           scraped_data/*.json
           scraped_data/chunks/*.json
+
+    - name: Analyze news with Claude
+      env:
+        CLAUDE_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
+      run: |
+        pip install anthropic
+        python analyze_with_claude.py
+
+    - name: Upload Claude analysis
+      uses: actions/upload-artifact@v4
+      with:
+        name: news-claude-analysis
+        path: scraped_data/*_claude_analysis.txt
