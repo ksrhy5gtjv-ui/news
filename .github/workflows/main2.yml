@@ -2,59 +2,40 @@ name: Weekly News Scraper
 
 on:
   schedule:
-    - cron: '0 6 * * 0'
+    - cron: '0 6 * * 0'   # Sundays 06:00 UTC
   workflow_dispatch:
 
 jobs:
-  scrape:
+  scrape-and-analyze:
     runs-on: ubuntu-latest
-
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.11'
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
 
-    - name: Install dependencies
-      run: |
-        pip install --upgrade pip
-        pip install -r requirements.txt
+      - name: Install dependencies
+        run: pip install -r requirements.txt
 
-    - name: Run news scraper
-      run: |
-        python news_scraper.py
+      - name: Run main scraper (CBC, etc.)
+        run: python news_scraper.py
 
-    - name: Upload scraped data (CSV and JSON)
-      uses: actions/upload-artifact@v4
-      with:
-        name: scraped-news-data
-        path: |
-          scraped_data/*.csv
-          scraped_data/*.json
-          scraped_data/chunks/*.json
+      - name: Run Radio-Canada scraper
+        run: python rc.py
 
-    - name: Analyze news with Claude
-      env:
-        CLAUDE_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
-      run: |
-        pip install anthropic
-        python analyze_with_claude.py
+      - name: Analyze with Claude (Storylines criteria)
+        env:
+          CLAUDE_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
+        run: python analyze_with_claude.py
 
-    - name: Upload Claude analysis
-      uses: actions/upload-artifact@v4
-      with:
-        name: news-claude-analysis
-        path: scraped_data/*_claude_analysis.txt
-
-    - name: Email Claude analysis results
-      env:
-        SMTP_SERVER: ${{ secrets.SMTP_SERVER }}
-        SMTP_PORT: ${{ secrets.SMTP_PORT }}
-        EMAIL_USER: ${{ secrets.EMAIL_USER }}
-        EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
-        EMAIL_TO: ${{ secrets.EMAIL_TO }}
-      run: |
-        python send_analysis_email.py
+      - name: Email me the results
+        env:
+          SMTP_SERVER: ${{ secrets.SMTP_SERVER }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          EMAIL_USER: ${{ secrets.EMAIL_USER }}
+          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+          EMAIL_TO: ${{ secrets.EMAIL_TO }}
+        run: python send_analysis_email_Version2.py
