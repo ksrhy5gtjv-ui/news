@@ -8,7 +8,7 @@ claude_api_key = os.getenv("CLAUDE_API_KEY")
 client = anthropic.Anthropic(api_key=claude_api_key)
 
 # Find your latest news JSON file
-files = sorted(glob("scraped_data/news_articles_*.json"), reverse=True)
+files = sorted(glob("scraped_data/*_articles_*.json"), reverse=True)
 if not files:
     raise Exception("No news articles JSON file found.")
 input_file = files[0]
@@ -27,7 +27,7 @@ storylines_prompt = """**Storylines** features character-driven documentary narr
 - **Novelty or surprise:** Is the story unusual or memorable in some way? Does it have an element that would intrigue listeners or make them want to share it (e.g. an unexpected twist, a unique situation, or a new perspective)?
 - **Rich storytelling potential:** Are there vivid scenes, settings, or dialogues in the article that you can imagine being portrayed in audio? Would this story "sound good" with interviews or scene-setting (as if "mixed like a movie")?
 
-**Task:** Read the news article provided below. Then, **write a brief analysis** evaluating if it has the ingredients listed above to be developed into a Storylines-style documentary.
+**Task:** Read the news article provided below. Then, **write a brief analysis** evaluating if it has any of these ingredients listed above to be developed into a Storylines-style documentary.
 
 Your response should include:
 1. A **verdict** – start with **"Yes"** if it is a good candidate or **"No"** if it is not. *(If it's borderline, use your best judgment to pick yes or no.)*
