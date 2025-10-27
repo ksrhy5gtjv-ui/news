@@ -1,4 +1,4 @@
-name: Weekly News Scraper & Claude Analysis
+name: Weekly News Scraper & Claude Analysis (with Radio-Canada)
 
 on:
   schedule:
@@ -23,11 +23,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # --- Fast sanity checks so failures are obvious ---
       - name: Verify repo files exist
         run: |
           ls -la
           test -f combined_scraper.py
+          test -f rc.py
           test -f analyze_with_claude_single.py
           test -f send_analysis_email_Version2.py
 
@@ -49,14 +49,72 @@ jobs:
           EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
           EMAIL_TO: ${{ secrets.EMAIL_TO }}
 
-      # 1) Scrape static (non-RC) sites into a single JSON
-      - name: Scrape all non-Radio-Canada sites
+      # 1) Scrape all non-RC sites
+      - name: Scrape static sites (non-Radio-Canada)
         run: |
           python combined_scraper.py --exclude-rc
-          echo "---- scraped_data ----"; ls -la scraped_data || true
+          echo "---- scraped_data after static ----"; ls -la scraped_data || true
 
-      # 2) Analyze with Claude (single pass)
-      - name: Analyze scraped news with Claude
+      # 2) Scrape Radio-Canada using your dedicated script
+      - name: Scrape Radio-Canada
+        run: |
+          python rc.py
+          echo "---- scraped_data after RC ----"; ls -la scraped_data || true
+
+      # 3) Merge latest static + latest RC JSON into ONE file for Claude
+      - name: Merge static + RC JSON
+        shell: bash
+        run: |
+          set -e
+          mkdir -p scraped_data
+          # newest static file:
+          STATIC=$(ls -t scraped_data/news_articles_*.json 2>/dev/null | head -n 1 || true)
+          # newest RC file:
+          RC=$(ls -t scraped_data/radio_canada_articles_*.json 2>/dev/null | head -n 1 || true)
+
+          if [ -z "$STATIC" ]; then
+            echo "::error::No static news_articles_*.json found"; exit 1
+          fi
+          if [ -z "$RC" ]; then
+            echo "::warning::No radio_canada_articles_*.json found; proceeding with static only"
+            cp "$STATIC" "$STATIC"  # no-op, keeps STATIC as merged base
+            MERGED="$STATIC"
+          else
+            python - <<'PY'
+import json, sys, glob, os, datetime
+from pathlib import Path
+
+def load(p):
+    with open(p, "r", encoding="utf-8") as f: return json.load(f)
+
+# inputs from env (passed by bash heredoc)
+STATIC = os.environ.get("STATIC_PATH")
+RC = os.environ.get("RC_PATH")
+
+a = load(STATIC)
+b = load(RC)
+
+# Dedup by URL
+seen=set(); out=[]
+for row in a + b:
+    u = (row or {}).get("url")
+    if not u or u in seen: continue
+    seen.add(u); out.append(row)
+
+ts = datetime.datetime.now().strftime("%Y%m%d")
+outp = f"scraped_data/news_articles_{ts}.json"
+with open(outp, "w", encoding="utf-8") as f:
+    json.dump(out, f, ensure_ascii=False, indent=2)
+print(f"Merged {len(a)} + {len(b)} -> {len(out)} into {outp}")
+PY
+            export STATIC_PATH="$STATIC"
+            export RC_PATH="$RC"
+          fi
+
+          echo "---- scraped_data after merge ----"; ls -la scraped_data || true
+
+      # 4) Analyze merged file with Claude (single pass)
+      - name: Analyze merged news with Claude
         env:
           CLAUDE_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
         run: |
@@ -64,13 +122,11 @@ jobs:
           sed -i "s/claude-3-5-sonnet-20241022/claude-sonnet-4-20250514/g" analyze_with_claude_single.py || true
           python analyze_with_claude_single.py
           echo "---- analysis ----"; ls -la analysis || true
-          echo "---- head of latest analysis (for debugging) ----"
           LATEST=$(ls -t analysis/claude_analysis_*.txt 2>/dev/null | head -n 1 || true)
-          if [ -n "$LATEST" ]; then head -n 40 "$LATEST"; fi
+          if [ -n "$LATEST" ]; then echo "Latest analysis:" "$LATEST"; head -n 40 "$LATEST"; fi
 
-      # 3) Normalize filename so your mailer can find it
+      # 5) Normalize filename so your mailer can find it
       - name: Prepare analysis file for email script
-        id: prep
         shell: bash
         run: |
           set -e
@@ -81,10 +137,10 @@ jobs:
           fi
           OUT="scraped_data/$(date +%Y%m%d)_claude_analysis.txt"
           cp "$LATEST" "$OUT"
-          echo "prepared=$OUT" >> "$GITHUB_OUTPUT"
+          echo "Prepared $OUT"
           ls -la scraped_data
 
-      # 4) Email latest analysis results (your existing script)
+      # 6) Email latest analysis using your existing script
       - name: Email latest analysis results
         env:
           SMTP_SERVER: ${{ secrets.SMTP_SERVER }}
@@ -95,7 +151,7 @@ jobs:
         run: |
           python send_analysis_email_Version2.py
 
-      # 5) Upload artifacts (even if email fails)
+      # 7) Upload artifacts (always try to save what we got)
       - name: Upload results as workflow artifacts
         if: always()
         uses: actions/upload-artifact@v4
@@ -103,6 +159,7 @@ jobs:
           name: news-analysis-results
           path: |
             scraped_data/news_articles_*.json
+            scraped_data/radio_canada_articles_*.json
             analysis/*.txt
             scraped_data/*_claude_analysis.txt
           if-no-files-found: warn
