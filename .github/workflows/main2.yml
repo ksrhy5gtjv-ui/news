@@ -2,7 +2,7 @@ name: Weekly News Scraper & Claude Analysis
 
 on:
   schedule:
-    - cron: '0 6 * * 0'   # Runs every Sunday at 6:00 UTC
+    - cron: '0 6 * * 0'   # Sundays at 06:00 UTC
   workflow_dispatch:
 
 jobs:
@@ -23,27 +23,34 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
-    # ---------------------------------------------------
-    # STEP 1: Run the merged static-site scraper
-    # ---------------------------------------------------
+    # 1) Scrape static (non-RC) sites into a single JSON
     - name: Scrape all non-Radio-Canada sites
       run: |
         python combined_scraper.py --exclude-rc
 
-    # ---------------------------------------------------
-    # STEP 2: Analyze the single JSON file with Claude
-    # ---------------------------------------------------
+    # 2) Analyze with Claude (single pass). Update the model ID if needed.
     - name: Analyze scraped news with Claude
       env:
         CLAUDE_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
       run: |
-        # Patch the model ID inline if needed
+        # Safety: patch deprecated model id if it still exists in the file
         sed -i "s/claude-3-5-sonnet-20241022/claude-sonnet-4-20250514/g" analyze_with_claude_single.py
         python analyze_with_claude_single.py
 
-    # ---------------------------------------------------
-    # STEP 3: Email yourself the latest Claude analysis
-    # ---------------------------------------------------
+    # 3) Normalize the output path/name so your mailer can find it
+    - name: Prepare analysis file for email script
+      run: |
+        set -e
+        mkdir -p scraped_data
+        LATEST=$(ls -t analysis/claude_analysis_*.txt | head -n 1)
+        if [ -z "$LATEST" ]; then
+          echo "No analysis file found in analysis/"; exit 1
+        fi
+        # Copy into scraped_data with the pattern your mailer expects
+        cp "$LATEST" "scraped_data/$(date +%Y%m%d)_claude_analysis.txt"
+        ls -l scraped_data/*_claude_analysis.txt
+
+    # 4) Email the latest analysis (uses your existing script)
     - name: Email latest analysis results
       env:
         SMTP_SERVER: ${{ secrets.SMTP_SERVER }}
@@ -54,9 +61,7 @@ jobs:
       run: |
         python send_analysis_email_Version2.py
 
-    # ---------------------------------------------------
-    # STEP 4: Upload artifacts (optional, but useful)
-    # ---------------------------------------------------
+    # 5) Upload artifacts
     - name: Upload results as workflow artifacts
       uses: actions/upload-artifact@v4
       with:
@@ -64,3 +69,4 @@ jobs:
         path: |
           scraped_data/news_articles_*.json
           analysis/*.txt
+          scraped_data/*_claude_analysis.txt
