@@ -23,6 +23,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      # Sanity checks so failures are obvious
       - name: Verify repo files exist
         run: |
           ls -la
@@ -49,7 +50,7 @@ jobs:
           EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
           EMAIL_TO: ${{ secrets.EMAIL_TO }}
 
-      # 1) Scrape all non-RC sites
+      # 1) Scrape static (non-Radio-Canada) sites to single JSON
       - name: Scrape static sites (non-Radio-Canada)
         run: |
           python combined_scraper.py --exclude-rc
@@ -61,40 +62,36 @@ jobs:
           python rc.py
           echo "---- scraped_data after RC ----"; ls -la scraped_data || true
 
-      # 3) Merge latest static + latest RC JSON into ONE file for Claude
+      # 3) Merge newest static JSON + newest RC JSON into ONE file for Claude
       - name: Merge static + RC JSON
         shell: bash
         run: |
           set -e
           mkdir -p scraped_data
-          # newest static file:
           STATIC=$(ls -t scraped_data/news_articles_*.json 2>/dev/null | head -n 1 || true)
-          # newest RC file:
           RC=$(ls -t scraped_data/radio_canada_articles_*.json 2>/dev/null | head -n 1 || true)
 
           if [ -z "$STATIC" ]; then
             echo "::error::No static news_articles_*.json found"; exit 1
           fi
+
           if [ -z "$RC" ]; then
             echo "::warning::No radio_canada_articles_*.json found; proceeding with static only"
-            cp "$STATIC" "$STATIC"  # no-op, keeps STATIC as merged base
-            MERGED="$STATIC"
           else
+            # Export first, THEN call Python (so env vars are visible inside Python)
+            export STATIC_PATH="$STATIC"
+            export RC_PATH="$RC"
             python - <<'PY'
-import json, sys, glob, os, datetime
-from pathlib import Path
-
+import json, os, datetime
 def load(p):
     with open(p, "r", encoding="utf-8") as f: return json.load(f)
 
-# inputs from env (passed by bash heredoc)
-STATIC = os.environ.get("STATIC_PATH")
-RC = os.environ.get("RC_PATH")
+STATIC = os.environ["STATIC_PATH"]
+RC = os.environ["RC_PATH"]
 
 a = load(STATIC)
 b = load(RC)
 
-# Dedup by URL
 seen=set(); out=[]
 for row in a + b:
     u = (row or {}).get("url")
@@ -107,8 +104,6 @@ with open(outp, "w", encoding="utf-8") as f:
     json.dump(out, f, ensure_ascii=False, indent=2)
 print(f"Merged {len(a)} + {len(b)} -> {len(out)} into {outp}")
 PY
-            export STATIC_PATH="$STATIC"
-            export RC_PATH="$RC"
           fi
 
           echo "---- scraped_data after merge ----"; ls -la scraped_data || true
@@ -118,14 +113,14 @@ PY
         env:
           CLAUDE_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
         run: |
-          # patch deprecated model id if still present (no-op otherwise)
+          # Patch deprecated model ID if still present (no-op otherwise)
           sed -i "s/claude-3-5-sonnet-20241022/claude-sonnet-4-20250514/g" analyze_with_claude_single.py || true
           python analyze_with_claude_single.py
           echo "---- analysis ----"; ls -la analysis || true
           LATEST=$(ls -t analysis/claude_analysis_*.txt 2>/dev/null | head -n 1 || true)
-          if [ -n "$LATEST" ]; then echo "Latest analysis:" "$LATEST"; head -n 40 "$LATEST"; fi
+          if [ -n "$LATEST" ]; then echo "Latest analysis:" "$LATEST"; head -n 30 "$LATEST"; fi
 
-      # 5) Normalize filename so your mailer can find it
+      # 5) Normalize filename so your mailer can find it (expects scraped_data/*_claude_analysis.txt)
       - name: Prepare analysis file for email script
         shell: bash
         run: |
