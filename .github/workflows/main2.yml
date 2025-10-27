@@ -2,7 +2,7 @@ name: Weekly News Scraper & Claude Analysis
 
 on:
   schedule:
-    - cron: '0 6 * * 0'   # Sundays at 06:00 UTC
+    - cron: '0 6 * * 0'
   workflow_dispatch:
 
 jobs:
@@ -23,34 +23,34 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
-    # 1) Scrape static (non-RC) sites into a single JSON
     - name: Scrape all non-Radio-Canada sites
       run: |
         python combined_scraper.py --exclude-rc
 
-    # 2) Analyze with Claude (single pass). Update the model ID if needed.
     - name: Analyze scraped news with Claude
       env:
         CLAUDE_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
       run: |
-        # Safety: patch deprecated model id if it still exists in the file
         sed -i "s/claude-3-5-sonnet-20241022/claude-sonnet-4-20250514/g" analyze_with_claude_single.py
         python analyze_with_claude_single.py
 
-    # 3) Normalize the output path/name so your mailer can find it
+    - name: Debug: list outputs on disk
+      run: |
+        pwd
+        echo "---- root ----"; ls -la
+        echo "---- scraped_data ----"; ls -la scraped_data || true
+        echo "---- analysis ----"; ls -la analysis || true
+
+    # If you want the mailer to keep its old pattern, keep this copy step.
     - name: Prepare analysis file for email script
       run: |
         set -e
         mkdir -p scraped_data
         LATEST=$(ls -t analysis/claude_analysis_*.txt | head -n 1)
-        if [ -z "$LATEST" ]; then
-          echo "No analysis file found in analysis/"; exit 1
-        fi
-        # Copy into scraped_data with the pattern your mailer expects
         cp "$LATEST" "scraped_data/$(date +%Y%m%d)_claude_analysis.txt"
-        ls -l scraped_data/*_claude_analysis.txt
+        echo "Prepared: scraped_data/$(date +%Y%m%d)_claude_analysis.txt"
+        ls -la scraped_data
 
-    # 4) Email the latest analysis (uses your existing script)
     - name: Email latest analysis results
       env:
         SMTP_SERVER: ${{ secrets.SMTP_SERVER }}
@@ -61,7 +61,6 @@ jobs:
       run: |
         python send_analysis_email_Version2.py
 
-    # 5) Upload artifacts
     - name: Upload results as workflow artifacts
       uses: actions/upload-artifact@v4
       with:
