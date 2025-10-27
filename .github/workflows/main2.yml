@@ -23,43 +23,68 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      # --- Fast sanity checks so failures are obvious ---
+      - name: Verify repo files exist
+        run: |
+          ls -la
+          test -f combined_scraper.py
+          test -f analyze_with_claude_single.py
+          test -f send_analysis_email_Version2.py
+
+      - name: Verify required secrets are present (not printing values)
+        shell: bash
+        run: |
+          for v in CLAUDE_API_KEY SMTP_SERVER SMTP_PORT EMAIL_USER EMAIL_PASSWORD EMAIL_TO; do
+            if [ -z "${!v}" ]; then
+              echo "::error::Missing secret $v"; exit 1
+            else
+              echo "Found secret $v"
+            fi
+          done
+        env:
+          CLAUDE_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
+          SMTP_SERVER: ${{ secrets.SMTP_SERVER }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          EMAIL_USER: ${{ secrets.EMAIL_USER }}
+          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+          EMAIL_TO: ${{ secrets.EMAIL_TO }}
+
       # 1) Scrape static (non-RC) sites into a single JSON
       - name: Scrape all non-Radio-Canada sites
         run: |
           python combined_scraper.py --exclude-rc
+          echo "---- scraped_data ----"; ls -la scraped_data || true
 
-      # 2) Analyze with Claude (single pass) — patch deprecated model ID if present
+      # 2) Analyze with Claude (single pass)
       - name: Analyze scraped news with Claude
         env:
           CLAUDE_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
         run: |
+          # patch deprecated model id if still present (no-op otherwise)
           sed -i "s/claude-3-5-sonnet-20241022/claude-sonnet-4-20250514/g" analyze_with_claude_single.py || true
           python analyze_with_claude_single.py
-
-      # 3) Debug listing so you can see what's on disk in run logs
-      - name: Debug: list outputs on disk
-        run: |
-          echo "---- PWD ----"; pwd
-          echo "---- root ----"; ls -la || true
-          echo "---- scraped_data ----"; ls -la scraped_data || true
           echo "---- analysis ----"; ls -la analysis || true
+          echo "---- head of latest analysis (for debugging) ----"
+          LATEST=$(ls -t analysis/claude_analysis_*.txt 2>/dev/null | head -n 1 || true)
+          if [ -n "$LATEST" ]; then head -n 40 "$LATEST"; fi
 
-      # 4) Normalize filename so your mailer can find it
+      # 3) Normalize filename so your mailer can find it
       - name: Prepare analysis file for email script
+        id: prep
         shell: bash
         run: |
           set -e
           mkdir -p scraped_data
           LATEST=$(ls -t analysis/claude_analysis_*.txt 2>/dev/null | head -n 1 || true)
           if [ -z "$LATEST" ]; then
-            echo "No analysis file found in analysis/. Aborting email step."; exit 1
+            echo "::error::No analysis file found in analysis/"; exit 1
           fi
           OUT="scraped_data/$(date +%Y%m%d)_claude_analysis.txt"
           cp "$LATEST" "$OUT"
-          echo "Prepared $OUT"
+          echo "prepared=$OUT" >> "$GITHUB_OUTPUT"
           ls -la scraped_data
 
-      # 5) Email latest analysis results using your existing script
+      # 4) Email latest analysis results (your existing script)
       - name: Email latest analysis results
         env:
           SMTP_SERVER: ${{ secrets.SMTP_SERVER }}
@@ -70,8 +95,9 @@ jobs:
         run: |
           python send_analysis_email_Version2.py
 
-      # 6) Upload artifacts (don’t fail the job if nothing is found)
+      # 5) Upload artifacts (even if email fails)
       - name: Upload results as workflow artifacts
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: news-analysis-results
