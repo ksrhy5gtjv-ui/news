@@ -2,7 +2,7 @@ name: Weekly News Scraper & Claude Analysis
 
 on:
   schedule:
-    - cron: '0 6 * * 0'
+    - cron: '0 6 * * 0'   # Sundays at 06:00 UTC
   workflow_dispatch:
 
 jobs:
@@ -10,62 +10,73 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.11'
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
 
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
 
-    - name: Scrape all non-Radio-Canada sites
-      run: |
-        python combined_scraper.py --exclude-rc
+      # 1) Scrape static (non-RC) sites into a single JSON
+      - name: Scrape all non-Radio-Canada sites
+        run: |
+          python combined_scraper.py --exclude-rc
 
-    - name: Analyze scraped news with Claude
-      env:
-        CLAUDE_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
-      run: |
-        sed -i "s/claude-3-5-sonnet-20241022/claude-sonnet-4-20250514/g" analyze_with_claude_single.py
-        python analyze_with_claude_single.py
+      # 2) Analyze with Claude (single pass) — patch deprecated model ID if present
+      - name: Analyze scraped news with Claude
+        env:
+          CLAUDE_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
+        run: |
+          sed -i "s/claude-3-5-sonnet-20241022/claude-sonnet-4-20250514/g" analyze_with_claude_single.py || true
+          python analyze_with_claude_single.py
 
-    - name: Debug: list outputs on disk
-      run: |
-        pwd
-        echo "---- root ----"; ls -la
-        echo "---- scraped_data ----"; ls -la scraped_data || true
-        echo "---- analysis ----"; ls -la analysis || true
+      # 3) Debug listing so you can see what's on disk in run logs
+      - name: Debug: list outputs on disk
+        run: |
+          echo "---- PWD ----"; pwd
+          echo "---- root ----"; ls -la || true
+          echo "---- scraped_data ----"; ls -la scraped_data || true
+          echo "---- analysis ----"; ls -la analysis || true
 
-    # If you want the mailer to keep its old pattern, keep this copy step.
-    - name: Prepare analysis file for email script
-      run: |
-        set -e
-        mkdir -p scraped_data
-        LATEST=$(ls -t analysis/claude_analysis_*.txt | head -n 1)
-        cp "$LATEST" "scraped_data/$(date +%Y%m%d)_claude_analysis.txt"
-        echo "Prepared: scraped_data/$(date +%Y%m%d)_claude_analysis.txt"
-        ls -la scraped_data
+      # 4) Normalize filename so your mailer can find it
+      - name: Prepare analysis file for email script
+        shell: bash
+        run: |
+          set -e
+          mkdir -p scraped_data
+          LATEST=$(ls -t analysis/claude_analysis_*.txt 2>/dev/null | head -n 1 || true)
+          if [ -z "$LATEST" ]; then
+            echo "No analysis file found in analysis/. Aborting email step."; exit 1
+          fi
+          OUT="scraped_data/$(date +%Y%m%d)_claude_analysis.txt"
+          cp "$LATEST" "$OUT"
+          echo "Prepared $OUT"
+          ls -la scraped_data
 
-    - name: Email latest analysis results
-      env:
-        SMTP_SERVER: ${{ secrets.SMTP_SERVER }}
-        SMTP_PORT: ${{ secrets.SMTP_PORT }}
-        EMAIL_USER: ${{ secrets.EMAIL_USER }}
-        EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
-        EMAIL_TO: ${{ secrets.EMAIL_TO }}
-      run: |
-        python send_analysis_email_Version2.py
+      # 5) Email latest analysis results using your existing script
+      - name: Email latest analysis results
+        env:
+          SMTP_SERVER: ${{ secrets.SMTP_SERVER }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          EMAIL_USER: ${{ secrets.EMAIL_USER }}
+          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+          EMAIL_TO: ${{ secrets.EMAIL_TO }}
+        run: |
+          python send_analysis_email_Version2.py
 
-    - name: Upload results as workflow artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: news-analysis-results
-        path: |
-          scraped_data/news_articles_*.json
-          analysis/*.txt
-          scraped_data/*_claude_analysis.txt
+      # 6) Upload artifacts (don’t fail the job if nothing is found)
+      - name: Upload results as workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: news-analysis-results
+          path: |
+            scraped_data/news_articles_*.json
+            analysis/*.txt
+            scraped_data/*_claude_analysis.txt
+          if-no-files-found: warn
