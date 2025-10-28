@@ -1,9 +1,4 @@
-diff --git a/.github/workflows/run-scrapers.yml b/.github/workflows/run-scrapers.yml
-new file mode 100644
-index 0000000000000000000000000000000000000000..7f0aa953245a2cc8ddb855743c0a61d82428c680
---- /dev/null
-+++ b/.github/workflows/run-scrapers.yml
-@@ -0,0 +1,36 @@
+
 +name: Run news scrapers
 +
 +on:
