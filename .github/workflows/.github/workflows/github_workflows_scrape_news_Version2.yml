@@ -1,0 +1,80 @@
+# Workflow: scheduled weekly on Sundays at 08:00 UTC, with manual dispatch inputs
+# NOTE: this file is ready to be committed to .github/workflows/scrape_news.yml
+on:
+  workflow_dispatch:
+    inputs:
+      max_bytes:
+        description: 'Max bytes per Claude payload (overrides default 2000000)'
+        required: false
+        default: '2000000'
+      timeout_minutes:
+        description: 'Job timeout in minutes (overrides default 720)'
+        required: false
+        default: '720'
+  schedule:
+    # Every Sunday at 08:00 UTC
+    - cron: '0 8 * * 0'
+
+jobs:
+  scrape-and-package:
+    # Use timeout from workflow_dispatch input or default 720 minutes
+    timeout-minutes: ${{ github.event.inputs.timeout_minutes || 720 }}
+    runs-on: ubuntu-latest
+    env:
+      # Default to 2,000,000 bytes (2 MB). Can be overridden by workflow_dispatch input max_bytes.
+      CLAUDE_MAX_BYTES: ${{ github.event.inputs.max_bytes || '2000000' }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
+      - name: Run Radio-Canada scraper (rc.py)
+        run: |
+          python rc.py
+
+      - name: Run aggregator scraper (news_scraper.py)
+        run: |
+          python news_scraper.py
+
+      - name: Create packaging dir
+        run: |
+          mkdir -p output_for_claude
+
+      - name: Package payloads for Claude
+        run: |
+          python tools/package_for_claude.py --input-dir scraped_data --output-dir output_for_claude --max-bytes "${{ env.CLAUDE_MAX_BYTES }}"
+
+      - name: List outputs
+        run: |
+          echo "=== scraped_data tree ==="
+          find scraped_data -maxdepth 3 -type f -printf '%p (%s bytes)\n' || true
+          echo
+          echo "=== output_for_claude tree ==="
+          find output_for_claude -maxdepth 2 -type f -printf '%p (%s bytes)\n' || true
+
+      - name: Archive payloads
+        run: |
+          zip -r output_for_claude.zip output_for_claude || true
+
+      - name: Upload artifact: full-scrape
+        uses: actions/upload-artifact@v4
+        with:
+          name: scraped_data
+          path: scraped_data
+
+      - name: Upload artifact: claude-payloads
+        uses: actions/upload-artifact@v4
+        with:
+          name: claude_payloads
+          path: |
+            output_for_claude
+            output_for_claude.zip
